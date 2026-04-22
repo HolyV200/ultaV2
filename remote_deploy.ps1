@@ -179,6 +179,3 @@ try {
     # Clear script block logging cache
     Remove-Item "$env:USERPROFILE\AppData\Local\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt" -Force -ErrorAction SilentlyContinue
 } catch { }
-
-# Keep the script alive so the watchdog thread stays running
-while ($true) { Start-Sleep -Seconds 60 }
