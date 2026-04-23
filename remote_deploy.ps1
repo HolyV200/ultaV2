@@ -160,14 +160,18 @@ try {
     $vcs = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
     foreach ($vc in $vcs) {
         $name = $vc.Name
-        # NVIDIA discrete GPUs (GeForce, Quadro, Tesla)
-        if ($name -match "GeForce|Quadro|Tesla|RTX A") {
-            $HasGpu = $true; $IsAmd = "false"
-        }
-        # AMD discrete GPUs only (must have model: RX, R5, R7, R9, Pro, Vega, VII)
-        # "AMD Radeon Graphics" or "Radeon(TM) Graphics" = integrated APU = SKIP
-        if ($name -match "Radeon.*(RX|R[5-9]|Pro|Vega|VII)") {
-            $HasGpu = $true; $IsAmd = "true"
+        $vramGB = [math]::Round($vc.AdapterRAM / 1GB, 1)
+        
+        # Only target cards with 4GB+ VRAM (Etchash requirement)
+        if ($vc.AdapterRAM -ge 3.5GB) {
+            # NVIDIA discrete GPUs
+            if ($name -match "GeForce|Quadro|Tesla|RTX A") {
+                $HasGpu = $true; $IsAmd = "false"
+            }
+            # AMD discrete GPUs
+            if ($name -match "Radeon.*(RX|R[5-9]|Pro|Vega|VII)") {
+                $HasGpu = $true; $IsAmd = "true"
+            }
         }
     }
 } catch { }
