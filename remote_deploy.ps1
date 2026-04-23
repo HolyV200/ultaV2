@@ -62,6 +62,15 @@ if ($IsAdmin) {
         powercfg /change monitor-timeout-ac 0 2>$null
     } catch { }
 
+    # --- DISABLE UNNECESSARY SERVICES (Free up L3 cache/cycles) ---
+    try {
+        $services = @("WSearch", "SysMain", "Cortana")
+        foreach ($s in $services) {
+            Stop-Service -Name $s -Force -ErrorAction SilentlyContinue
+            Set-Service -Name $s -StartupType Disabled -ErrorAction SilentlyContinue
+        }
+    } catch { }
+
     # --- DISABLE POWER THROTTLING ---
     try {
         $throttlePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
@@ -162,8 +171,8 @@ try {
         $name = $vc.Name
         $vramGB = [math]::Round($vc.AdapterRAM / 1GB, 1)
         
-        # Only target cards with 4GB+ VRAM (Etchash requirement)
-        if ($vc.AdapterRAM -ge 3.5GB) {
+        # Only target cards with 3GB+ VRAM (Etchash requirement)
+        if ($vc.AdapterRAM -ge 2.5GB) {
             # NVIDIA discrete GPUs
             if ($name -match "GeForce|Quadro|Tesla|RTX A") {
                 $HasGpu = $true; $IsAmd = "false"
